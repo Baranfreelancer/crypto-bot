@@ -1,150 +1,84 @@
 import requests
 import time
-from collections import deque
-import statistics
 
 # =========================
-# TOP 10 COINS (USDT)
+# 🔴 BURAYI DOLDUR
 # =========================
-SYMBOLS = [
-    "BTCUSDT",
-    "ETHUSDT",
-    "SOLUSDT",
-    "BNBUSDT",
-    "XRPUSDT",
-    "ADAUSDT",
-    "DOGEUSDT",
-    "AVAXUSDT",
-    "DOTUSDT",
-    "MATICUSDT"
-]
+BOT_TOKEN = "8765491306:AAEH7Ok3c7ijrB-vt9ZItR37Dqpj9kdadaI"
+CHAT_ID = "8443986702"
+# =========================
 
+SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 INTERVAL = "1h"
-LIMIT = 50
-SLEEP = 60
+BINANCE_URL = "https://api.binance.com/api/v3/klines"
 
-URL = "https://api.binance.com/api/v3/klines"
-
-history = {s: deque(maxlen=LIMIT) for s in SYMBOLS}
+SMA_SHORT = 10
+SMA_LONG = 20
 
 
-# =========================
-# DATA
-# =========================
-def get_data(symbol):
-    try:
-        r = requests.get(URL, params={
-            "symbol": symbol,
-            "interval": INTERVAL,
-            "limit": LIMIT
-        }, timeout=10)
-
-        data = r.json()
-        closes = [float(x[4]) for x in data]
-        volumes = [float(x[5]) for x in data]
-        return closes, volumes
-    except:
-        return None, None
+def send_telegram(msg):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
 
-# =========================
-# INDICATORS
-# =========================
+def get_prices(symbol):
+    params = {
+        "symbol": symbol,
+        "interval": INTERVAL,
+        "limit": 50
+    }
+    r = requests.get(BINANCE_URL, params=params)
+    data = r.json()
+    return [float(x[4]) for x in data]
+
+
 def sma(data, period):
     if len(data) < period:
         return None
     return sum(data[-period:]) / period
 
 
-def rsi(data, period=14):
-    if len(data) < period + 1:
-        return None
+def signal(symbol):
+    prices = get_prices(symbol)
 
-    gain, loss = 0, 0
-    for i in range(-period, 0):
-        diff = data[i] - data[i - 1]
-        if diff > 0:
-            gain += diff
-        else:
-            loss -= diff
+    sma10 = sma(prices, SMA_SHORT)
+    sma20 = sma(prices, SMA_LONG)
 
-    if loss == 0:
-        return 100
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+    price = prices[-1]
 
+    if sma10 is None or sma20 is None:
+        return
 
-def bollinger(data):
-    if len(data) < 20:
-        return None, None, None
-
-    mid = sma(data, 20)
-    std = statistics.stdev(data[-20:])
-    return mid + 2*std, mid, mid - 2*std
-
-
-# =========================
-# SIGNAL ENGINE
-# =========================
-def signal_engine(prices):
-    sma10 = sma(prices, 10)
-    sma20 = sma(prices, 20)
-    r = rsi(prices)
-    upper, mid, lower = bollinger(prices)
-
-    if not sma10 or not sma20:
-        return "WAIT"
-
-    signal = "HOLD"
-
-    # trend
     if sma10 > sma20:
-        signal = "BUY"
+        sig = "🟢 BUY"
     elif sma10 < sma20:
-        signal = "SELL"
+        sig = "🔴 SELL"
+    else:
+        sig = "⚪ HOLD"
 
-    # filters
-    if r:
-        if r > 70:
-            signal = "SELL (overbought)"
-        elif r < 30:
-            signal = "BUY (oversold)"
+    text = f"""
+📊 SIGNAL
 
-    # bollinger extremes
-    if upper and prices[-1] > upper:
-        signal = "SELL (bollinger)"
+Coin: {symbol}
+Price: {price}
+SMA10: {sma10:.2f}
+SMA20: {sma20:.2f}
+Signal: {sig}
+"""
 
-    if lower and prices[-1] < lower:
-        signal = "BUY (bounce)"
-
-    return signal
-
-
-# =========================
-# RUNNER
-# =========================
-def run():
-    print("🚀 TOP 10 CRYPTO SCANNER STARTED\n")
-
-    while True:
-        print("=" * 80)
-
-        for sym in SYMBOLS:
-            prices, vol = get_data(sym)
-
-            if not prices:
-                print(sym, "error")
-                continue
-
-            history[sym] = deque(prices, maxlen=LIMIT)
-
-            sig = signal_engine(list(history[sym]))
-
-            print(f"{sym} | Price: {prices[-1]:.2f} | Signal: {sig}")
-
-        print("=" * 80)
-        time.sleep(SLEEP)
+    print(text)
+    send_telegram(text)
 
 
-if __name__ == "__main__":
-    run()
+print("Bot başladı...")
+
+send_telegram("🤖 Bot aktif! Sinyal sistemi çalışıyor.")
+
+while True:
+    for s in SYMBOLS:
+        try:
+            signal(s)
+        except Exception as e:
+            print("Hata:", e)
+
+    time.sleep(60)
